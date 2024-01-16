@@ -25,7 +25,7 @@ def launch_dofus():
     elif platform == "win32":
         appdata = os.getenv("appdata")
         parent = os.path.dirname(appdata)
-        path = parent + "\\Local\\Ankama\\zaap\\dofus\\Dofus.exe"
+        path = parent + "\\Local\\Ankama\\Dofus\\Dofus.exe"
     else:
         assert False, (
             "Your platform (%s) doesn't support automated launch yet" % sys.platform
@@ -81,7 +81,7 @@ if __name__ == "__main__":
 
         def my_callback(coJeu, coSer):
             global bridges
-            bridge = InjectorBridgeHandler(coJeu, coSer, dumper=dumper)
+            bridge = InjectorBridgeHandler(coJeu, coSer)
             bridges.append(bridge)
             bridge.loop()
 
@@ -103,6 +103,7 @@ if __name__ == "__main__":
                 assert False, "Your platform requires a pid to attach"
 
     if args.launch or args.attach:
+        print("Launching hooked Dofus instance")
         hook(target, args.port, FILTER)
         pass
 

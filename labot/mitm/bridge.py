@@ -15,6 +15,8 @@ import os
 import logging
 import time
 
+from .utils.pathfinding import move_to_cell
+
 from ..data import Buffer, Msg, Dumper
 from .. import protocol
 
@@ -36,7 +38,7 @@ def direction(origin):
 class BridgeHandler(ABC):
     """Abstract class for bridging policies.
     You just have to subclass and fill the handle method.
-    
+
     It implements the proxy_callback that will be called
     when a client tries to connect to the server.
     proxy_callback will call `handle` on every packet.
@@ -106,12 +108,18 @@ class PrintingBridgeHandler(DummyBridgeHandler):
         print(direction(origin), data.hex())
 
 
+class DofBotBridgeHandler(BridgeHandler):
+    def handle(self, data, origin):
+        self.other[origin].sendall(data)
+        print(direction(origin), data.hex())
+
+
 class MsgBridgeHandler(DummyBridgeHandler, ABC):
     """
     Advanced policy to work with the parsed messages
     instead of the raw packets like BridgeHandler.
-    
-    This class implements a generic `handle` that calls 
+
+    This class implements a generic `handle` that calls
     `handle_message` which acts on the parsed messages
     and that should be implemented by the subclasses.
     """
@@ -121,7 +129,6 @@ class MsgBridgeHandler(DummyBridgeHandler, ABC):
         self.buf = {coJeu: Buffer(), coSer: Buffer()}
 
     def handle(self, data, origin):
-
         super().handle(data, origin)
         self.buf[origin] += data
         from_client = origin == self.coJeu
@@ -131,9 +138,12 @@ class MsgBridgeHandler(DummyBridgeHandler, ABC):
             msgType = protocol.msg_from_id[msg.id]
             parsedMsg = protocol.read(msgType, msg.data)
 
-            assert msg.data.remaining() == 0, (
-                "All content of %s have not been read into %s:\n %s"
-                % (msgType, parsedMsg, msg.data)
+            assert (
+                msg.data.remaining() == 0
+            ), "All content of %s have not been read into %s:\n %s" % (
+                msgType,
+                parsedMsg,
+                msg.data,
             )
 
             self.handle_message(parsedMsg, origin)
@@ -156,6 +166,8 @@ class InjectorBridgeHandler(BridgeHandler):
     """Forwards all packets and allows to inject
     packets
     """
+
+    current_map_id = None
 
     def __init__(self, coJeu, coSer, db_size=100, dumper=None):
         super().__init__(coJeu, coSer)
@@ -185,19 +197,36 @@ class InjectorBridgeHandler(BridgeHandler):
         )
         self.send_to_server(msg)
 
+    def move_to_map(self, map_id, key_movements):
+        msg = Msg.from_json(
+            {
+                "__type__": "GameMapMovementRequestMessage",
+                "mapId": map_id,
+                "keyMovements": key_movements,
+            }
+        )
+        self.send_to_server(msg)
+
     def handle(self, data, origin):
         self.buf[origin] += data
         from_client = origin == self.coJeu
-
-        msg = Msg.fromRaw(self.buf[origin], from_client)
+        try:
+            msg = Msg.fromRaw(self.buf[origin], from_client)
+        except KeyError:
+            msg = None
+            print("Invalid key error")
 
         while msg is not None:
             msgType = protocol.msg_from_id[msg.id]
             parsedMsg = protocol.read(msgType, msg.data)
 
-            assert msg.data.remaining() in [0, 48], (
-                "All content of %s have not been read into %s:\n %s"
-                % (msgType, parsedMsg, msg.data)
+            assert msg.data.remaining() in [
+                0,
+                48,
+            ], "All content of %s have not been read into %s:\n %s" % (
+                msgType,
+                parsedMsg,
+                msg.data,
             )
 
             if from_client:
@@ -229,5 +258,72 @@ class InjectorBridgeHandler(BridgeHandler):
 
             time.sleep(0.005)
 
-    def handle_message(self, m, o):
-        pass
+    def filter_message(self, message):
+        type = message["__type__"]
+        filtered_message_type = [
+            "BasicAckMessage",
+            "CharactersListMessage",
+            "BasicPingMessage",
+            "BasicPongMessage",
+            "CharacterStatsListMessage",
+            "EmoteAddMessage",
+            "CharacterExperienceGainMessage",
+            "NotificationListMessage",
+            "GameRolePlayArenaUpdatePlayerInfosMessage",
+            "AchievementListMessage",
+            "InventoryContentMessage",
+            "PresetsMessage",
+            "JobDescriptionMessage",
+            "FriendsGetListMessage" "AcquaintancesGetListMessage",
+            "IgnoredGetListMessage",
+            "SpouseGetInformationsMessage",
+            "GuildGetInformationsMessage",
+            "GuildGetPlayerApplicationMessage",
+            "GuildRanksRequestMessage",
+            "AllianceGetPlayerApplicationMessage",
+            "AllianceRanksRequestMessage",
+            "PrismsListMessage",
+            "GameActionItemListMessage",
+            "AnomalySubareaInformationResponseMessage",
+            "QuestListMessage",
+            "AcquaintancesListMessage" "FriendsListMessage",
+            "GameActionItemListMessage",
+            "FollowedQuestsMessage",
+            "JobExperienceMultiUpdateMessage",
+            "ShortcutBarContentMessage",
+            "MountSetMessage",
+            "ChatServerMessage",
+            "AnomalyStateMessage",
+            "JobCrafterDirectorySettingsMessage",
+            "BasicLatencyStatsMessage",
+            "BasicLatencyStatsRequestMessage",
+            "AllianceInformation",
+            "PrismAddOrUpdateMessage",
+            "CharactersListRequestMessage",
+            "AccountCapabilitiesMessage",
+            "ServerOptionalFeaturesMessage",
+            "SequenceNumberRequestMessage",
+            "SequenceNumberMessage",
+            "GameContextRefreshEntityLookMessage",
+            "GameDataPaddockObjectListAddMessage",
+            "CurrentMapMessage",
+            "PaddockPropertiesMessage",
+            "SetCharacterRestrictionsMessage",
+            "AreaFightModificatorUpdateMessage",
+            "InteractiveElementUpdatedMessage",
+            "BasicTimeMessage",
+            "GameRolePlayShowActorMessage",
+            "StatedElementUpdatedMessage",
+        ]
+        return message if type not in filtered_message_type else None
+
+    def handle_message(self, message, origin):
+        message = self.filter_message(message)
+
+        if message is None:
+            return
+
+        # cell_id = get_current_cell_id(message, "Etienne-le-bolideurr")
+        move_to_cell(message)
+
+        # print(message)
